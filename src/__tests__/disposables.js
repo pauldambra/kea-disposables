@@ -78,6 +78,66 @@ describe("disposables", () => {
     expect(disposed).toEqual(["disposed"]);
   });
 
+  test("setup called twice creates multiple disposables - NOT idempotent", () => {
+    const disposed = [];
+
+    const logic = kea([
+      actions({ setup: true }),
+      disposables(),
+      listeners(({ disposables }) => ({
+        setup: () => {
+          disposables.add(() => {
+            return () => disposed.push("disposed");
+          });
+        },
+      })),
+    ]);
+
+    logic.mount();
+    logic.actions.setup(); // First call
+    logic.actions.setup(); // Second call - creates another disposable!
+
+    logic.unmount();
+    expect(disposed).toEqual(["disposed", "disposed"]); // TWO disposals!
+  });
+
+  test("setup called twice with key - shows when disposal happens", () => {
+    const events = [];
+
+    const logic = kea([
+      actions({ setup: true }),
+      disposables(),
+      listeners(({ disposables }) => ({
+        setup: () => {
+          disposables.add(() => {
+            events.push("setup ran");
+            return () => events.push("disposed");
+          }, "setup-key"); // Using a key
+        },
+      })),
+    ]);
+
+    logic.mount();
+
+    logic.actions.setup(); // First call
+    expect(events).toEqual(["setup ran"]); // Setup runs immediately
+
+    logic.actions.setup(); // Second call - should dispose first, then setup new
+    expect(events).toEqual([
+      "setup ran", // First setup
+      "disposed", // First disposed immediately when replaced
+      "setup ran", // Second setup
+    ]);
+
+    logic.unmount(); // Should dispose the second one
+    expect(events).toEqual([
+      "setup ran", // First setup
+      "disposed", // First disposed when replaced
+      "setup ran", // Second setup
+      "disposed", // Second disposed on unmount
+    ]);
+  });
+
   test("disposes resources added after mount", () => {
     const disposed = [];
 

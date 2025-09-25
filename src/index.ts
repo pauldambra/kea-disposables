@@ -1,11 +1,5 @@
-import {
-  setPluginContext,
-  getPluginContext,
-  LogicBuilder,
-  afterMount,
-  beforeUnmount,
-} from "kea";
-import type { BuiltLogic, KeaPlugin } from "kea";
+import { LogicBuilder, beforeUnmount } from "kea";
+import type { KeaPlugin, BuiltLogic } from "kea";
 
 export type DisposableFunction = () => void;
 export type SetupFunction = () => DisposableFunction;
@@ -15,24 +9,20 @@ type DisposablesManager = {
   dispose: (key: string) => boolean;
 };
 
-type LogicDisposables = {
+type DisposablesCache = {
   disposables: Map<string, DisposableFunction>;
   keyCounter: number;
 };
 
-type DisposablesPluginContext = {
-  logicDisposables: Map<string, LogicDisposables>;
+// Type for logic with disposables added
+type LogicWithCache = BuiltLogic & {
+  cache: { disposables?: DisposablesCache; [key: string]: any };
+  disposables?: DisposablesManager;
 };
-
-const getDisposablesContext = (): DisposablesPluginContext =>
-  getPluginContext("disposables");
-const setDisposablesContext = (context: DisposablesPluginContext) =>
-  setPluginContext("disposables", context);
 
 export function disposables(): LogicBuilder {
   return (logic) => {
-    const { logicDisposables } = getDisposablesContext();
-
+    const typedLogic = logic as LogicWithCache;
     const safeCleanup = (cleanup: DisposableFunction, context: string) => {
       try {
         cleanup();
@@ -41,16 +31,25 @@ export function disposables(): LogicBuilder {
       }
     };
 
+    const getDisposablesCache = (): DisposablesCache => {
+      if (!typedLogic.cache.disposables) {
+        typedLogic.cache.disposables = {
+          disposables: new Map(),
+          keyCounter: 0,
+        };
+      }
+      return typedLogic.cache.disposables;
+    };
+
     const disposablesManager: DisposablesManager = {
       add: (setup: SetupFunction, key?: string) => {
-        const logicData = logicDisposables.get(logic.pathString);
-        if (!logicData) return;
-
-        const disposableKey = key ?? `__auto_${logicData.keyCounter++}`;
+        const disposablesCache = getDisposablesCache();
+        const disposableKey = key ?? `__auto_${disposablesCache.keyCounter++}`;
 
         // If replacing a keyed disposable, clean up the previous one first
-        if (key && logicData.disposables.has(disposableKey)) {
-          const previousCleanup = logicData.disposables.get(disposableKey)!;
+        if (key && disposablesCache.disposables.has(disposableKey)) {
+          const previousCleanup =
+            disposablesCache.disposables.get(disposableKey)!;
           safeCleanup(
             previousCleanup,
             `Previous disposable cleanup failed for key "${key}"`,
@@ -59,36 +58,28 @@ export function disposables(): LogicBuilder {
 
         // Run setup function to get cleanup function
         const cleanup = setup();
-        logicData.disposables.set(disposableKey, cleanup);
+        disposablesCache.disposables.set(disposableKey, cleanup);
       },
       dispose: (key: string) => {
-        const logicData = logicDisposables.get(logic.pathString);
-        if (!logicData || !logicData.disposables.has(key)) return false;
+        const disposablesCache = getDisposablesCache();
+        if (!disposablesCache.disposables.has(key)) return false;
 
-        const cleanup = logicData.disposables.get(key)!;
+        const cleanup = disposablesCache.disposables.get(key)!;
         safeCleanup(cleanup, `Manual dispose failed for key "${key}"`);
-        logicData.disposables.delete(key);
+        disposablesCache.disposables.delete(key);
         return true;
       },
     };
 
-    logic.disposables = disposablesManager;
-
-    afterMount(() => {
-      logicDisposables.set(logic.pathString, {
-        disposables: new Map(),
-        keyCounter: 0,
-      });
-    })(logic);
+    typedLogic.disposables = disposablesManager;
 
     beforeUnmount(() => {
-      const logicData = logicDisposables.get(logic.pathString);
       // Only dispose on final unmount when logic.isMounted() becomes false
-      if (logicData && !logic.isMounted()) {
-        logicData.disposables.forEach((disposable) => {
+      if (!typedLogic.isMounted() && typedLogic.cache.disposables) {
+        typedLogic.cache.disposables.disposables.forEach((disposable) => {
           safeCleanup(disposable, "Disposable failed");
         });
-        logicDisposables.delete(logic.pathString);
+        typedLogic.cache.disposables = null;
       }
     })(logic);
   };
@@ -96,11 +87,4 @@ export function disposables(): LogicBuilder {
 
 export const disposablesPlugin: KeaPlugin = {
   name: "disposables",
-  events: {
-    afterPlugin(): void {
-      setDisposablesContext({
-        logicDisposables: new Map(),
-      });
-    },
-  },
 };
