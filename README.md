@@ -184,6 +184,32 @@ const wasDisposed = disposables.dispose('polling') // true
 disposables.dispose('non-existent') // false
 ```
 
+## Error Handling
+
+The plugin handles disposal errors gracefully:
+
+- **Failed disposables don't break others**: If one cleanup function throws an error, other disposables still run
+- **Selective logging**: Only logs errors for unexpected failures (unmount errors and manual disposal failures)
+- **Silent expected operations**: Replacing keyed disposables doesn't log errors (this is expected behavior)
+
+```js
+disposables.add(() => {
+  return () => {
+    throw new Error('cleanup failed')
+  }
+}, 'problematic')
+
+disposables.add(() => {
+  console.log('This cleanup will still run')
+  return () => console.log('Cleaned up successfully')
+}, 'good')
+
+// On unmount:
+// → Console: "[KEA] Disposable cleanup failed in logic kea.logic.1: Error: cleanup failed"
+// → Console: "Cleaned up successfully" 
+// → All disposables attempted, errors don't stop others
+```
+
 ## Multi-Mount Logic Support
 
 For keyed logics that can be mounted multiple times, disposables only run on the **final unmount**:

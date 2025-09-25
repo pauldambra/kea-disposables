@@ -187,7 +187,7 @@ describe("disposables", () => {
 
     expect(disposed).toEqual(["first", "third"]);
     expect(consoleSpy).toHaveBeenCalledWith(
-      expect.stringContaining("[KEA] Disposable failed"),
+      expect.stringContaining("[KEA] Disposable cleanup failed in logic"),
       expect.any(Error),
     );
 
@@ -435,7 +435,7 @@ describe("disposables", () => {
     logic.actions.cleanup();
 
     expect(consoleSpy).toHaveBeenCalledWith(
-      expect.stringContaining("[KEA] Manual dispose failed"),
+      expect.stringContaining("[KEA] Disposable cleanup failed in logic"),
       expect.any(Error),
     );
 

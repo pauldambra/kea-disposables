@@ -22,11 +22,14 @@ export function disposables(): LogicBuilder {
   return (logic) => {
     const typedLogic = logic as LogicWithCache;
 
-    const safeCleanup = (cleanup: DisposableFunction, context: string) => {
+    const safeCleanup = (cleanup: DisposableFunction) => {
       try {
         cleanup();
       } catch (error) {
-        console.error(`[KEA] ${context} in logic ${logic.pathString}:`, error);
+        console.error(
+          `[KEA] Disposable cleanup failed in logic ${logic.pathString}:`,
+          error,
+        );
       }
     };
 
@@ -44,10 +47,7 @@ export function disposables(): LogicBuilder {
           // If replacing a keyed disposable, clean up the previous one first
           if (key && manager.registry.has(disposableKey)) {
             const previousCleanup = manager.registry.get(disposableKey)!;
-            safeCleanup(
-              previousCleanup,
-              `Previous disposable cleanup failed for key "${key}"`,
-            );
+            safeCleanup(previousCleanup);
           }
 
           // Run setup function to get cleanup function
@@ -59,7 +59,7 @@ export function disposables(): LogicBuilder {
           if (!manager.registry.has(key)) return false;
 
           const cleanup = manager.registry.get(key)!;
-          safeCleanup(cleanup, `Manual dispose failed for key "${key}"`);
+          safeCleanup(cleanup);
           manager.registry.delete(key);
           return true;
         },
@@ -73,7 +73,7 @@ export function disposables(): LogicBuilder {
       // Only dispose on final unmount when logic.isMounted() becomes false
       if (!typedLogic.isMounted() && typedLogic.cache.disposables) {
         typedLogic.cache.disposables.registry.forEach((disposable) => {
-          safeCleanup(disposable, "Disposable failed");
+          safeCleanup(disposable);
         });
         typedLogic.cache.disposables = null;
       }
