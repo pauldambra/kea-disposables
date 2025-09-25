@@ -14,12 +14,14 @@ type DisposablesManager = {
 // Type for logic with disposables added
 type LogicWithCache = BuiltLogic & {
   cache: { disposables?: DisposablesManager | null; [key: string]: any };
+  // Note: disposables is a reference to cache.disposables for API convenience
   disposables: DisposablesManager;
 };
 
 export function disposables(): LogicBuilder {
   return (logic) => {
     const typedLogic = logic as LogicWithCache;
+
     const safeCleanup = (cleanup: DisposableFunction, context: string) => {
       try {
         cleanup();
@@ -28,45 +30,44 @@ export function disposables(): LogicBuilder {
       }
     };
 
-    const getDisposablesManager = (): DisposablesManager => {
-      if (!typedLogic.cache.disposables) {
-        typedLogic.cache.disposables = {
-          registry: new Map(),
-          keyCounter: 0,
-          add: (setup: SetupFunction, key?: string) => {
-            const manager = typedLogic.cache.disposables!;
-            const disposableKey = key ?? `__auto_${manager.keyCounter++}`;
+    const getManager = () => typedLogic.cache.disposables!;
 
-            // If replacing a keyed disposable, clean up the previous one first
-            if (key && manager.registry.has(disposableKey)) {
-              const previousCleanup = manager.registry.get(disposableKey)!;
-              safeCleanup(
-                previousCleanup,
-                `Previous disposable cleanup failed for key "${key}"`,
-              );
-            }
+    // Initialize disposables manager in cache
+    if (!typedLogic.cache.disposables) {
+      typedLogic.cache.disposables = {
+        registry: new Map(),
+        keyCounter: 0,
+        add: (setup: SetupFunction, key?: string) => {
+          const manager = getManager();
+          const disposableKey = key ?? `__auto_${manager.keyCounter++}`;
 
-            // Run setup function to get cleanup function
-            const cleanup = setup();
-            manager.registry.set(disposableKey, cleanup);
-          },
-          dispose: (key: string) => {
-            const manager = typedLogic.cache.disposables!;
-            if (!manager.registry.has(key)) return false;
+          // If replacing a keyed disposable, clean up the previous one first
+          if (key && manager.registry.has(disposableKey)) {
+            const previousCleanup = manager.registry.get(disposableKey)!;
+            safeCleanup(
+              previousCleanup,
+              `Previous disposable cleanup failed for key "${key}"`,
+            );
+          }
 
-            const cleanup = manager.registry.get(key)!;
-            safeCleanup(cleanup, `Manual dispose failed for key "${key}"`);
-            manager.registry.delete(key);
-            return true;
-          },
-        };
-      }
-      return typedLogic.cache.disposables;
-    };
+          // Run setup function to get cleanup function
+          const cleanup = setup();
+          manager.registry.set(disposableKey, cleanup);
+        },
+        dispose: (key: string) => {
+          const manager = getManager();
+          if (!manager.registry.has(key)) return false;
 
-    // Initialize the disposables manager in the cache and expose it
-    const disposablesManager = getDisposablesManager();
-    typedLogic.disposables = disposablesManager;
+          const cleanup = manager.registry.get(key)!;
+          safeCleanup(cleanup, `Manual dispose failed for key "${key}"`);
+          manager.registry.delete(key);
+          return true;
+        },
+      };
+    }
+
+    // Expose disposables manager on logic
+    typedLogic.disposables = typedLogic.cache.disposables;
 
     beforeUnmount(() => {
       // Only dispose on final unmount when logic.isMounted() becomes false
