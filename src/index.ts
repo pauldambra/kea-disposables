@@ -7,17 +7,14 @@ export type SetupFunction = () => DisposableFunction;
 type DisposablesManager = {
   add: (setup: SetupFunction, key?: string) => void;
   dispose: (key: string) => boolean;
-};
-
-type DisposablesCache = {
-  disposables: Map<string, DisposableFunction>;
+  registry: Map<string, DisposableFunction>;
   keyCounter: number;
 };
 
 // Type for logic with disposables added
 type LogicWithCache = BuiltLogic & {
-  cache: { disposables?: DisposablesCache; [key: string]: any };
-  disposables?: DisposablesManager;
+  cache: { disposables?: DisposablesManager | null; [key: string]: any };
+  disposables: DisposablesManager;
 };
 
 export function disposables(): LogicBuilder {
@@ -31,52 +28,50 @@ export function disposables(): LogicBuilder {
       }
     };
 
-    const getDisposablesCache = (): DisposablesCache => {
+    const getDisposablesManager = (): DisposablesManager => {
       if (!typedLogic.cache.disposables) {
         typedLogic.cache.disposables = {
-          disposables: new Map(),
+          registry: new Map(),
           keyCounter: 0,
+          add: (setup: SetupFunction, key?: string) => {
+            const manager = typedLogic.cache.disposables!;
+            const disposableKey = key ?? `__auto_${manager.keyCounter++}`;
+
+            // If replacing a keyed disposable, clean up the previous one first
+            if (key && manager.registry.has(disposableKey)) {
+              const previousCleanup = manager.registry.get(disposableKey)!;
+              safeCleanup(
+                previousCleanup,
+                `Previous disposable cleanup failed for key "${key}"`,
+              );
+            }
+
+            // Run setup function to get cleanup function
+            const cleanup = setup();
+            manager.registry.set(disposableKey, cleanup);
+          },
+          dispose: (key: string) => {
+            const manager = typedLogic.cache.disposables!;
+            if (!manager.registry.has(key)) return false;
+
+            const cleanup = manager.registry.get(key)!;
+            safeCleanup(cleanup, `Manual dispose failed for key "${key}"`);
+            manager.registry.delete(key);
+            return true;
+          },
         };
       }
       return typedLogic.cache.disposables;
     };
 
-    const disposablesManager: DisposablesManager = {
-      add: (setup: SetupFunction, key?: string) => {
-        const disposablesCache = getDisposablesCache();
-        const disposableKey = key ?? `__auto_${disposablesCache.keyCounter++}`;
-
-        // If replacing a keyed disposable, clean up the previous one first
-        if (key && disposablesCache.disposables.has(disposableKey)) {
-          const previousCleanup =
-            disposablesCache.disposables.get(disposableKey)!;
-          safeCleanup(
-            previousCleanup,
-            `Previous disposable cleanup failed for key "${key}"`,
-          );
-        }
-
-        // Run setup function to get cleanup function
-        const cleanup = setup();
-        disposablesCache.disposables.set(disposableKey, cleanup);
-      },
-      dispose: (key: string) => {
-        const disposablesCache = getDisposablesCache();
-        if (!disposablesCache.disposables.has(key)) return false;
-
-        const cleanup = disposablesCache.disposables.get(key)!;
-        safeCleanup(cleanup, `Manual dispose failed for key "${key}"`);
-        disposablesCache.disposables.delete(key);
-        return true;
-      },
-    };
-
+    // Initialize the disposables manager in the cache and expose it
+    const disposablesManager = getDisposablesManager();
     typedLogic.disposables = disposablesManager;
 
     beforeUnmount(() => {
       // Only dispose on final unmount when logic.isMounted() becomes false
       if (!typedLogic.isMounted() && typedLogic.cache.disposables) {
-        typedLogic.cache.disposables.disposables.forEach((disposable) => {
+        typedLogic.cache.disposables.registry.forEach((disposable) => {
           safeCleanup(disposable, "Disposable failed");
         });
         typedLogic.cache.disposables = null;
