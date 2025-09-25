@@ -8,11 +8,7 @@ describe("disposables", () => {
     });
   });
 
-  test.each([
-    ["single disposable", 1],
-    ["multiple disposables", 3],
-    ["many disposables", 10],
-  ])("disposes %s on unmount", (_, count) => {
+  test("disposes single disposable on unmount", () => {
     const disposed = [];
 
     const logic = kea([
@@ -20,12 +16,7 @@ describe("disposables", () => {
       disposables(),
       listeners(({ disposables }) => ({
         addDisposable: () => {
-          for (let i = 0; i < count; i++) {
-            disposables.add(() => {
-              // Setup runs immediately
-              return () => disposed.push(i); // Cleanup runs on unmount
-            });
-          }
+          disposables.add(() => () => disposed.push("disposed"));
         },
       })),
     ]);
@@ -35,7 +26,30 @@ describe("disposables", () => {
     expect(disposed).toEqual([]);
 
     logic.unmount();
-    expect(disposed).toEqual([...Array(count).keys()]);
+    expect(disposed).toEqual(["disposed"]);
+  });
+
+  test("disposes multiple disposables on unmount", () => {
+    const disposed = [];
+
+    const logic = kea([
+      actions({ addDisposables: true }),
+      disposables(),
+      listeners(({ disposables }) => ({
+        addDisposables: () => {
+          disposables.add(() => () => disposed.push("first"));
+          disposables.add(() => () => disposed.push("second"));
+          disposables.add(() => () => disposed.push("third"));
+        },
+      })),
+    ]);
+
+    logic.mount();
+    logic.actions.addDisposables();
+    expect(disposed).toEqual([]);
+
+    logic.unmount();
+    expect(disposed).toEqual(["first", "second", "third"]);
   });
 
   test("only disposes on final unmount with multiple mounts", () => {

@@ -16,7 +16,6 @@ type DisposablesManager = {
 };
 
 type LogicDisposables = {
-  logic: BuiltLogic;
   disposables: Map<string, DisposableFunction>;
   keyCounter: number;
 };
@@ -34,50 +33,42 @@ export function disposables(): LogicBuilder {
   return (logic) => {
     const { logicDisposables } = getDisposablesContext();
 
+    const safeCleanup = (cleanup: DisposableFunction, context: string) => {
+      try {
+        cleanup();
+      } catch (error) {
+        console.error(`[KEA] ${context} in logic ${logic.pathString}:`, error);
+      }
+    };
+
     const disposablesManager: DisposablesManager = {
       add: (setup: SetupFunction, key?: string) => {
         const logicData = logicDisposables.get(logic.pathString);
-        if (logicData) {
-          const disposableKey = key ?? `__auto_${logicData.keyCounter++}`;
+        if (!logicData) return;
 
-          // If replacing a keyed disposable, clean up the previous one first
-          if (key && logicData.disposables.has(disposableKey)) {
-            const previousCleanup = logicData.disposables.get(disposableKey);
-            if (previousCleanup) {
-              try {
-                previousCleanup();
-              } catch (error) {
-                console.error(
-                  `[KEA] Previous disposable cleanup failed for key "${key}" in logic ${logic.pathString}:`,
-                  error,
-                );
-              }
-            }
-          }
+        const disposableKey = key ?? `__auto_${logicData.keyCounter++}`;
 
-          // Run setup function to get cleanup function
-          const cleanup = setup();
-          logicData.disposables.set(disposableKey, cleanup);
+        // If replacing a keyed disposable, clean up the previous one first
+        if (key && logicData.disposables.has(disposableKey)) {
+          const previousCleanup = logicData.disposables.get(disposableKey)!;
+          safeCleanup(
+            previousCleanup,
+            `Previous disposable cleanup failed for key "${key}"`,
+          );
         }
+
+        // Run setup function to get cleanup function
+        const cleanup = setup();
+        logicData.disposables.set(disposableKey, cleanup);
       },
       dispose: (key: string) => {
         const logicData = logicDisposables.get(logic.pathString);
-        if (logicData && logicData.disposables.has(key)) {
-          const cleanup = logicData.disposables.get(key);
-          if (cleanup) {
-            try {
-              cleanup();
-            } catch (error) {
-              console.error(
-                `[KEA] Manual dispose failed for key "${key}" in logic ${logic.pathString}:`,
-                error,
-              );
-            }
-          }
-          logicData.disposables.delete(key);
-          return true;
-        }
-        return false;
+        if (!logicData || !logicData.disposables.has(key)) return false;
+
+        const cleanup = logicData.disposables.get(key)!;
+        safeCleanup(cleanup, `Manual dispose failed for key "${key}"`);
+        logicData.disposables.delete(key);
+        return true;
       },
     };
 
@@ -85,7 +76,6 @@ export function disposables(): LogicBuilder {
 
     afterMount(() => {
       logicDisposables.set(logic.pathString, {
-        logic,
         disposables: new Map(),
         keyCounter: 0,
       });
@@ -96,14 +86,7 @@ export function disposables(): LogicBuilder {
       // Only dispose on final unmount when logic.isMounted() becomes false
       if (logicData && !logic.isMounted()) {
         logicData.disposables.forEach((disposable) => {
-          try {
-            disposable();
-          } catch (error) {
-            console.error(
-              `[KEA] Disposable failed for logic ${logic.pathString}:`,
-              error,
-            );
-          }
+          safeCleanup(disposable, "Disposable failed");
         });
         logicDisposables.delete(logic.pathString);
       }
