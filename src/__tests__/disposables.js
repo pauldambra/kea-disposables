@@ -1,5 +1,5 @@
 import { resetContext, kea, actions, listeners } from "kea";
-import { disposablesPlugin, disposables } from "../index";
+import { disposablesPlugin } from "../index";
 
 describe("disposables", () => {
   beforeEach(() => {
@@ -13,10 +13,9 @@ describe("disposables", () => {
 
     const logic = kea([
       actions({ addDisposable: true }),
-      disposables(),
-      listeners(({ disposables }) => ({
+      listeners(({ cache }) => ({
         addDisposable: () => {
-          disposables.add(() => () => disposed.push("disposed"));
+          cache.disposables.add(() => () => disposed.push("disposed"));
         },
       })),
     ]);
@@ -34,12 +33,11 @@ describe("disposables", () => {
 
     const logic = kea([
       actions({ addDisposables: true }),
-      disposables(),
-      listeners(({ disposables }) => ({
+      listeners(({ cache }) => ({
         addDisposables: () => {
-          disposables.add(() => () => disposed.push("first"));
-          disposables.add(() => () => disposed.push("second"));
-          disposables.add(() => () => disposed.push("third"));
+          cache.disposables.add(() => () => disposed.push("first"));
+          cache.disposables.add(() => () => disposed.push("second"));
+          cache.disposables.add(() => () => disposed.push("third"));
         },
       })),
     ]);
@@ -57,10 +55,9 @@ describe("disposables", () => {
 
     const logic = kea([
       actions({ setup: true }),
-      disposables(),
-      listeners(({ disposables }) => ({
+      listeners(({ cache }) => ({
         setup: () => {
-          disposables.add(() => {
+          cache.disposables.add(() => {
             return () => disposed.push("disposed");
           });
         },
@@ -83,10 +80,9 @@ describe("disposables", () => {
 
     const logic = kea([
       actions({ setup: true }),
-      disposables(),
-      listeners(({ disposables }) => ({
+      listeners(({ cache }) => ({
         setup: () => {
-          disposables.add(() => {
+          cache.disposables.add(() => {
             return () => disposed.push("disposed");
           });
         },
@@ -106,10 +102,9 @@ describe("disposables", () => {
 
     const logic = kea([
       actions({ setup: true }),
-      disposables(),
-      listeners(({ disposables }) => ({
+      listeners(({ cache }) => ({
         setup: () => {
-          disposables.add(() => {
+          cache.disposables.add(() => {
             events.push("setup ran");
             return () => events.push("disposed");
           }, "setup-key"); // Using a key
@@ -143,10 +138,9 @@ describe("disposables", () => {
 
     const logic = kea([
       actions({ laterAction: true }),
-      disposables(),
-      listeners(({ disposables }) => ({
+      listeners(({ cache }) => ({
         laterAction: () => {
-          disposables.add(() => {
+          cache.disposables.add(() => {
             return () => disposed.push("later");
           });
         },
@@ -169,14 +163,13 @@ describe("disposables", () => {
 
     const logic = kea([
       actions({ setup: true }),
-      disposables(),
-      listeners(({ disposables }) => ({
+      listeners(({ cache }) => ({
         setup: () => {
-          disposables.add(() => () => disposed.push("first"));
-          disposables.add(() => () => {
+          cache.disposables.add(() => () => disposed.push("first"));
+          cache.disposables.add(() => () => {
             throw new Error("test error");
           });
-          disposables.add(() => () => disposed.push("third"));
+          cache.disposables.add(() => () => disposed.push("third"));
         },
       })),
     ]);
@@ -199,10 +192,9 @@ describe("disposables", () => {
 
     const logic = kea([
       actions({ startPolling: true }),
-      disposables(),
-      listeners(({ disposables }) => ({
+      listeners(({ cache }) => ({
         startPolling: () => {
-          disposables.add(() => {
+          cache.disposables.add(() => {
             const timeout = setTimeout(() => {}, 1000);
             timeouts.push(timeout);
             return () => clearTimeout(timeout);
@@ -229,14 +221,13 @@ describe("disposables", () => {
 
     const logic = kea([
       actions({ setup: true }),
-      disposables(),
-      listeners(({ disposables }) => ({
+      listeners(({ cache }) => ({
         setup: () => {
-          disposables.add(() => {
+          cache.disposables.add(() => {
             setupRuns.push("first");
             return () => disposed.push("first");
           }, key);
-          disposables.add(() => {
+          cache.disposables.add(() => {
             setupRuns.push("second");
             return () => disposed.push("second");
           }, key);
@@ -272,13 +263,12 @@ describe("disposables", () => {
 
     const logic = kea([
       actions({ setup: true, update: true }),
-      disposables(),
-      listeners(({ disposables }) => ({
+      listeners(({ cache }) => ({
         setup: () => {
-          disposables.add(() => () => disposed.push("original"), "polling");
+          cache.disposables.add(() => () => disposed.push("original"), "polling");
         },
         update: () => {
-          disposables.add(() => () => mountCleanups.push("updated"), "polling");
+          cache.disposables.add(() => () => mountCleanups.push("updated"), "polling");
         },
       })),
     ]);
@@ -298,10 +288,9 @@ describe("disposables", () => {
 
     const logic = kea([
       actions({ addDisposable: true }),
-      disposables(),
-      listeners(({ disposables }) => ({
+      listeners(({ cache }) => ({
         addDisposable: () => {
-          disposables.add(() => {
+          cache.disposables.add(() => {
             setupRuns.push("setup ran");
             return () => setupRuns.push("cleanup ran");
           });
@@ -324,16 +313,15 @@ describe("disposables", () => {
 
     const logic = kea([
       actions({ setup: true, update: true }),
-      disposables(),
-      listeners(({ disposables }) => ({
+      listeners(({ cache }) => ({
         setup: () => {
-          disposables.add(() => {
+          cache.disposables.add(() => {
             events.push("original setup");
             return () => events.push("original cleanup");
           }, "polling");
         },
         update: () => {
-          disposables.add(() => {
+          cache.disposables.add(() => {
             events.push("updated setup");
             return () => events.push("updated cleanup");
           }, "polling");
@@ -366,15 +354,14 @@ describe("disposables", () => {
 
     const logic = kea([
       actions({ setup: true, cleanup: true }),
-      disposables(),
-      listeners(({ disposables }) => ({
+      listeners(({ cache }) => ({
         setup: () => {
-          disposables.add(() => {
+          cache.disposables.add(() => {
             return () => disposed.push("manual cleanup");
           }, "test-key");
         },
         cleanup: () => {
-          const wasDisposed = disposables.dispose("test-key");
+          const wasDisposed = cache.disposables.dispose("test-key");
           expect(wasDisposed).toBe(true);
         },
       })),
@@ -394,10 +381,9 @@ describe("disposables", () => {
   test("dispose returns false for non-existent keys", () => {
     const logic = kea([
       actions({ test: true }),
-      disposables(),
-      listeners(({ disposables }) => ({
+      listeners(({ cache }) => ({
         test: () => {
-          const wasDisposed = disposables.dispose("non-existent");
+          const wasDisposed = cache.disposables.dispose("non-existent");
           expect(wasDisposed).toBe(false);
         },
       })),
@@ -414,17 +400,16 @@ describe("disposables", () => {
 
     const logic = kea([
       actions({ setup: true, cleanup: true }),
-      disposables(),
-      listeners(({ disposables }) => ({
+      listeners(({ cache }) => ({
         setup: () => {
-          disposables.add(() => {
+          cache.disposables.add(() => {
             return () => {
               throw new Error("dispose error");
             };
           }, "error-key");
         },
         cleanup: () => {
-          const wasDisposed = disposables.dispose("error-key");
+          const wasDisposed = cache.disposables.dispose("error-key");
           expect(wasDisposed).toBe(true); // Still returns true even if cleanup failed
         },
       })),

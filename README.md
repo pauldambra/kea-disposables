@@ -28,22 +28,21 @@ The disposables plugin makes resource cleanup impossible to forget:
 
 ```js
 // ✅ Automatic cleanup - no memory leaks
-import { disposablesPlugin, disposables } from 'kea-disposables'
+import { disposablesPlugin } from 'kea-disposables'
 
 resetContext({ plugins: [disposablesPlugin] })
 
 const logic = kea([
-  disposables(), // Add disposables to this logic
-  listeners(({ disposables }) => ({
+  listeners(({ cache }) => ({
     startPolling: () => {
       // Setup runs immediately, returns cleanup function
-      disposables.add(() => {
+      cache.disposables.add(() => {
         const timeout = setTimeout(pollData, 1000)
         return () => clearTimeout(timeout) // Cleanup runs on unmount
       })
     },
     subscribeToEvents: () => {
-      disposables.add(() => {
+      cache.disposables.add(() => {
         const handler = (e) => console.log('clicked', e.target)
         document.addEventListener('click', handler)
         return () => document.removeEventListener('click', handler)
@@ -59,7 +58,7 @@ Here's a real-world polling logic that demonstrates all the features:
 
 ```js
 import { kea, actions, reducers, listeners } from 'kea'
-import { disposablesPlugin, disposables } from 'kea-disposables'
+import { disposablesPlugin } from 'kea-disposables'
 
 resetContext({ plugins: [disposablesPlugin] })
 
@@ -70,7 +69,7 @@ const pollingLogic = kea([
     updateData: (data) => ({ data }),
     setInterval: (ms) => ({ ms })
   }),
-  
+
   reducers({
     isPolling: [false, {
       startPolling: () => true,
@@ -84,22 +83,19 @@ const pollingLogic = kea([
     }]
   }),
 
-  // This is what makes cleanup automatic
-  disposables(),
-  
-  listeners(({ actions, values, disposables }) => ({
+  listeners(({ actions, values, cache }) => ({
     startPolling: () => {
       // This is the magic - setup runs immediately, returns cleanup
       // Using a key makes this idempotent - calling startPolling multiple times
       // won't create multiple intervals
-      disposables.add(() => {
+      cache.disposables.add(() => {
         // pollData function omitted for brevity
         const pollData = () => { /* fetch data and call actions.updateData() */ }
-        
+
         // Setup runs immediately - start polling right away
         pollData()
         const intervalId = setInterval(pollData, values.interval)
-        
+
         // Return cleanup function
         return () => {
           clearInterval(intervalId)
@@ -107,7 +103,7 @@ const pollingLogic = kea([
         }
       }, 'polling-interval')
     },
-    
+
     setInterval: () => {
       // When interval changes, restart polling with new interval
       if (values.isPolling) {
@@ -115,10 +111,10 @@ const pollingLogic = kea([
         actions.startPolling()
       }
     },
-    
+
     stopPolling: () => {
       // Manually dispose the polling interval
-      disposables.dispose('polling-interval')
+      cache.disposables.dispose('polling-interval')
       console.log('Polling stopped manually')
     }
   }))
@@ -136,7 +132,7 @@ pollingLogic.unmount()
 
 ## API
 
-### `disposables.add(setupFunction, key?)`
+### `cache.disposables.add(setupFunction, key?)`
 
 Like React's `useEffect`, you pass a setup function that runs immediately and returns a cleanup function.
 
@@ -145,24 +141,24 @@ Like React's `useEffect`, you pass a setup function that runs immediately and re
 
 ```js
 // Auto-generated key - allows multiple disposables
-disposables.add(() => {
+cache.disposables.add(() => {
   const timeout = setTimeout(doSomething, 1000)
   return () => clearTimeout(timeout)
 })
 
 // Named key - replaces previous disposable with same key
-disposables.add(() => {
+cache.disposables.add(() => {
   const interval = setInterval(poll, 1000)
   return () => clearInterval(interval)
 }, 'my-polling')
 
-disposables.add(() => {
+cache.disposables.add(() => {
   const newInterval = setInterval(poll, 500) // Faster polling
   return () => clearInterval(newInterval)
 }, 'my-polling') // Replaces previous - old interval is cleared immediately
 ```
 
-### `disposables.dispose(key)`
+### `cache.disposables.dispose(key)`
 
 Manually cleanup a specific disposable by its key.
 
@@ -171,17 +167,17 @@ Manually cleanup a specific disposable by its key.
 
 ```js
 // Add a keyed disposable
-disposables.add(() => {
+cache.disposables.add(() => {
   const interval = setInterval(poll, 1000)
   return () => clearInterval(interval)
 }, 'polling')
 
 // Later, manually stop it
-const wasDisposed = disposables.dispose('polling') // true
+const wasDisposed = cache.disposables.dispose('polling') // true
 // The cleanup function runs immediately, interval is cleared
 
 // Trying to dispose non-existent key returns false
-disposables.dispose('non-existent') // false
+cache.disposables.dispose('non-existent') // false
 ```
 
 ## Error Handling
@@ -189,24 +185,23 @@ disposables.dispose('non-existent') // false
 The plugin handles disposal errors gracefully:
 
 - **Failed disposables don't break others**: If one cleanup function throws an error, other disposables still run
-- **Selective logging**: Only logs errors for unexpected failures (unmount errors and manual disposal failures)
-- **Silent expected operations**: Replacing keyed disposables doesn't log errors (this is expected behavior)
+- **Logs all errors**: All cleanup errors are logged with context
 
 ```js
-disposables.add(() => {
+cache.disposables.add(() => {
   return () => {
     throw new Error('cleanup failed')
   }
 }, 'problematic')
 
-disposables.add(() => {
+cache.disposables.add(() => {
   console.log('This cleanup will still run')
   return () => console.log('Cleaned up successfully')
 }, 'good')
 
 // On unmount:
 // → Console: "[KEA] Disposable cleanup failed in logic kea.logic.1: Error: cleanup failed"
-// → Console: "Cleaned up successfully" 
+// → Console: "Cleaned up successfully"
 // → All disposables attempted, errors don't stop others
 ```
 
@@ -216,9 +211,10 @@ For keyed logics that can be mounted multiple times, disposables only run on the
 
 ```js
 const keyedLogic = kea([
-  key: (props) => props.id,
-  disposables(),
-  // ... setup disposables
+  key((props) => props.id),
+  listeners(({ cache }) => ({
+    // ... setup disposables with cache.disposables.add()
+  }))
 ])
 
 keyedLogic({ id: 'user-123' }).mount() // Mount count: 1
