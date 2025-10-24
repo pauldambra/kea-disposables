@@ -20,7 +20,7 @@
   },
   "packageManager": "pnpm@10.0.0",
   "jest": {
-    "testEnvironment": "node",
+    "testEnvironment": "jsdom",
     "transform": {
       "^.+\\.(js|ts)$": "babel-jest"
     }

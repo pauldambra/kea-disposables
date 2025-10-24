@@ -1,5 +1,8 @@
 import { resetContext, kea, actions, listeners } from "kea";
-import { disposablesPlugin } from "../index";
+import {
+  disposablesPlugin,
+  __resetGlobalVisibilityStateForTests,
+} from "../index";
 
 describe("disposables", () => {
   beforeEach(() => {
@@ -265,10 +268,16 @@ describe("disposables", () => {
       actions({ setup: true, update: true }),
       listeners(({ cache }) => ({
         setup: () => {
-          cache.disposables.add(() => () => disposed.push("original"), "polling");
+          cache.disposables.add(
+            () => () => disposed.push("original"),
+            "polling",
+          );
         },
         update: () => {
-          cache.disposables.add(() => () => mountCleanups.push("updated"), "polling");
+          cache.disposables.add(
+            () => () => mountCleanups.push("updated"),
+            "polling",
+          );
         },
       })),
     ]);
@@ -425,5 +434,336 @@ describe("disposables", () => {
     );
 
     consoleSpy.mockRestore();
+  });
+
+  describe("visibility-based pause/resume", () => {
+    let visibilityChangeCallback = null;
+
+    beforeEach(() => {
+      __resetGlobalVisibilityStateForTests();
+
+      resetContext({
+        plugins: [disposablesPlugin],
+      });
+
+      jest
+        .spyOn(document, "addEventListener")
+        .mockImplementation((event, callback) => {
+          if (event === "visibilitychange") {
+            visibilityChangeCallback = callback;
+          }
+        });
+
+      Object.defineProperty(document, "hidden", {
+        configurable: true,
+        writable: true,
+        value: false,
+      });
+    });
+
+    afterEach(() => {
+      visibilityChangeCallback = null;
+      jest.restoreAllMocks();
+    });
+
+    const setDocumentHidden = (hidden) => {
+      Object.defineProperty(document, "hidden", {
+        configurable: true,
+        writable: true,
+        value: hidden,
+      });
+    };
+
+    test("disposables pause when page becomes hidden", () => {
+      const events = [];
+
+      const logic = kea([
+        actions({ setup: true }),
+        listeners(({ cache }) => ({
+          setup: () => {
+            cache.disposables.add(() => {
+              events.push("setup");
+              return () => events.push("cleanup");
+            }, "test");
+          },
+        })),
+      ]);
+
+      logic.mount();
+      logic.actions.setup();
+      expect(events).toEqual(["setup"]);
+
+      setDocumentHidden(true);
+      visibilityChangeCallback?.();
+      expect(events).toEqual(["setup", "cleanup"]);
+
+      setDocumentHidden(false);
+      visibilityChangeCallback?.();
+      expect(events).toEqual(["setup", "cleanup", "setup"]);
+
+      logic.unmount();
+      expect(events).toEqual(["setup", "cleanup", "setup", "cleanup"]);
+    });
+
+    test("disposables with pauseOnPageHidden: false do NOT pause", () => {
+      const events = [];
+
+      const logic = kea([
+        actions({ setup: true }),
+        listeners(({ cache }) => ({
+          setup: () => {
+            cache.disposables.add(
+              () => {
+                events.push("setup");
+                return () => events.push("cleanup");
+              },
+              "test",
+              { pauseOnPageHidden: false },
+            );
+          },
+        })),
+      ]);
+
+      logic.mount();
+      logic.actions.setup();
+      expect(events).toEqual(["setup"]);
+
+      setDocumentHidden(true);
+      visibilityChangeCallback?.();
+      expect(events).toEqual(["setup"]);
+
+      setDocumentHidden(false);
+      visibilityChangeCallback?.();
+      expect(events).toEqual(["setup"]);
+
+      logic.unmount();
+      expect(events).toEqual(["setup", "cleanup"]);
+    });
+
+    test("multiple disposables pause and resume together", () => {
+      const events = [];
+
+      const logic = kea([
+        actions({ setup: true }),
+        listeners(({ cache }) => ({
+          setup: () => {
+            cache.disposables.add(() => {
+              events.push("first-setup");
+              return () => events.push("first-cleanup");
+            }, "first");
+
+            cache.disposables.add(() => {
+              events.push("second-setup");
+              return () => events.push("second-cleanup");
+            }, "second");
+
+            cache.disposables.add(
+              () => {
+                events.push("nopause-setup");
+                return () => events.push("nopause-cleanup");
+              },
+              "nopause",
+              { pauseOnPageHidden: false },
+            );
+          },
+        })),
+      ]);
+
+      logic.mount();
+      logic.actions.setup();
+      expect(events).toEqual(["first-setup", "second-setup", "nopause-setup"]);
+
+      setDocumentHidden(true);
+      visibilityChangeCallback?.();
+      expect(events).toEqual([
+        "first-setup",
+        "second-setup",
+        "nopause-setup",
+        "first-cleanup",
+        "second-cleanup",
+      ]);
+
+      setDocumentHidden(false);
+      visibilityChangeCallback?.();
+      expect(events).toEqual([
+        "first-setup",
+        "second-setup",
+        "nopause-setup",
+        "first-cleanup",
+        "second-cleanup",
+        "first-setup",
+        "second-setup",
+      ]);
+    });
+
+    test("disposables across multiple logics all pause/resume", () => {
+      const logic1Events = [];
+      const logic2Events = [];
+
+      const logic1 = kea([
+        actions({ setup: true }),
+        listeners(({ cache }) => ({
+          setup: () => {
+            cache.disposables.add(() => {
+              logic1Events.push("setup");
+              return () => logic1Events.push("cleanup");
+            });
+          },
+        })),
+      ]);
+
+      const logic2 = kea([
+        actions({ setup: true }),
+        listeners(({ cache }) => ({
+          setup: () => {
+            cache.disposables.add(() => {
+              logic2Events.push("setup");
+              return () => logic2Events.push("cleanup");
+            });
+          },
+        })),
+      ]);
+
+      logic1.mount();
+      logic1.actions.setup();
+      logic2.mount();
+      logic2.actions.setup();
+
+      expect(logic1Events).toEqual(["setup"]);
+      expect(logic2Events).toEqual(["setup"]);
+
+      setDocumentHidden(true);
+      visibilityChangeCallback?.();
+
+      expect(logic1Events).toEqual(["setup", "cleanup"]);
+      expect(logic2Events).toEqual(["setup", "cleanup"]);
+
+      setDocumentHidden(false);
+      visibilityChangeCallback?.();
+
+      expect(logic1Events).toEqual(["setup", "cleanup", "setup"]);
+      expect(logic2Events).toEqual(["setup", "cleanup", "setup"]);
+    });
+
+    test("real-world setInterval pauses and resumes", () => {
+      jest.useFakeTimers();
+      const pollCalls = [];
+
+      const logic = kea([
+        actions({ startPolling: true }),
+        listeners(({ cache }) => ({
+          startPolling: () => {
+            cache.disposables.add(() => {
+              const intervalId = setInterval(() => {
+                pollCalls.push(Date.now());
+              }, 1000);
+              return () => clearInterval(intervalId);
+            }, "polling");
+          },
+        })),
+      ]);
+
+      logic.mount();
+      logic.actions.startPolling();
+
+      jest.advanceTimersByTime(3000);
+      expect(pollCalls).toHaveLength(3);
+
+      setDocumentHidden(true);
+      visibilityChangeCallback?.();
+
+      const beforeHidden = pollCalls.length;
+
+      jest.advanceTimersByTime(3000);
+      expect(pollCalls).toHaveLength(beforeHidden);
+
+      setDocumentHidden(false);
+      visibilityChangeCallback?.();
+
+      jest.advanceTimersByTime(3000);
+      expect(pollCalls).toHaveLength(beforeHidden + 3);
+
+      jest.useRealTimers();
+    });
+
+    test("visibility listener only attached once globally", () => {
+      const addEventListener = jest.spyOn(document, "addEventListener");
+
+      const logic1 = kea([actions({}), listeners(() => ({}))]);
+      const logic2 = kea([actions({}), listeners(() => ({}))]);
+      const logic3 = kea([actions({}), listeners(() => ({}))]);
+
+      logic1.mount();
+      logic2.mount();
+      logic3.mount();
+
+      const visibilityListenerCount = addEventListener.mock.calls.filter(
+        ([event]) => event === "visibilitychange",
+      ).length;
+
+      expect(visibilityListenerCount).toBe(1);
+    });
+
+    test("visibility listener is removed when all logics unmount", () => {
+      const removeEventListener = jest.spyOn(document, "removeEventListener");
+
+      const logic1 = kea([actions({}), listeners(() => ({}))]);
+      const logic2 = kea([actions({}), listeners(() => ({}))]);
+
+      logic1.mount();
+      logic2.mount();
+
+      logic1.unmount();
+      expect(removeEventListener).not.toHaveBeenCalled();
+
+      logic2.unmount();
+      expect(removeEventListener).toHaveBeenCalledWith(
+        "visibilitychange",
+        expect.any(Function),
+      );
+    });
+
+    test("setup errors during resume are caught and logged", () => {
+      const consoleSpy = jest
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+      const events = [];
+
+      const logic = kea([
+        actions({ setup: true }),
+        listeners(({ cache }) => ({
+          setup: () => {
+            let setupCount = 0;
+            cache.disposables.add(() => {
+              setupCount++;
+              events.push(`setup-${setupCount}`);
+              if (setupCount === 2) {
+                throw new Error("Resume failed!");
+              }
+              return () => events.push(`cleanup-${setupCount}`);
+            }, "test");
+          },
+        })),
+      ]);
+
+      logic.mount();
+      logic.actions.setup();
+      expect(events).toEqual(["setup-1"]);
+
+      setDocumentHidden(true);
+      visibilityChangeCallback?.();
+      expect(events).toEqual(["setup-1", "cleanup-1"]);
+
+      setDocumentHidden(false);
+      visibilityChangeCallback?.();
+      expect(events).toEqual(["setup-1", "cleanup-1", "setup-2"]);
+
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining("[KEA] Disposable setup failed"),
+        expect.any(Error),
+      );
+
+      consoleSpy.mockRestore();
+    });
   });
 });
