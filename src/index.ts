@@ -93,6 +93,8 @@ const resumeAllDisposables = (): void => {
         const cleanup = safeSetup(entry.setup, manager.logicPath);
         if (cleanup) {
           entry.cleanup = cleanup;
+        } else {
+          entry.cleanup = () => {};
         }
       }
     });
