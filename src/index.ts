@@ -22,6 +22,7 @@ type DisposablesManager = {
   dispose: (key: string) => boolean;
   registry: Map<string, DisposableEntry>;
   keyCounter: number;
+  logicPath: string;
 };
 
 // Type for logic with disposables added
@@ -79,8 +80,7 @@ const pauseAllDisposables = (): void => {
   globalVisibilityState.allManagers.forEach((manager) => {
     manager.registry.forEach((entry) => {
       if (entry.options.pauseOnPageHidden !== false && entry.cleanup) {
-        const logicPath = "unknown";
-        safeCleanup(entry.cleanup, logicPath);
+        safeCleanup(entry.cleanup, manager.logicPath);
       }
     });
   });
@@ -90,8 +90,7 @@ const resumeAllDisposables = (): void => {
   globalVisibilityState.allManagers.forEach((manager) => {
     manager.registry.forEach((entry) => {
       if (entry.options.pauseOnPageHidden !== false) {
-        const logicPath = "unknown";
-        const cleanup = safeSetup(entry.setup, logicPath);
+        const cleanup = safeSetup(entry.setup, manager.logicPath);
         if (cleanup) {
           entry.cleanup = cleanup;
         }
@@ -102,10 +101,6 @@ const resumeAllDisposables = (): void => {
 
 const attachGlobalVisibilityListener = (): void => {
   if (globalVisibilityState.listenerAttached) {
-    return;
-  }
-
-  if (typeof document === "undefined") {
     return;
   }
 
@@ -149,6 +144,7 @@ const initializeDisposablesManager = (logic: LogicWithCache): void => {
   const manager: DisposablesManager = {
     registry: new Map(),
     keyCounter: 0,
+    logicPath: logic.pathString,
     add: (setup: SetupFunction, key?: string, options?: DisposableOptions) => {
       const manager = getManager();
       const disposableKey = key ?? `__auto_${manager.keyCounter++}`;
